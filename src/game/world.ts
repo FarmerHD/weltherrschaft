@@ -126,6 +126,15 @@ function emptyBuildings(): Region["buildings"] {
   return { economy: 0, barracks: 0, fortress: 0 };
 }
 
+/** Owned start regions begin with a level-1 barracks already built, so
+ *  training begins on turn one instead of everyone sitting at 0 troops/s
+ *  until they manually save up for and build their first barracks. */
+function startingBuildings(owner: string): Region["buildings"] {
+  const buildings = emptyBuildings();
+  if (owner !== NEUTRAL) buildings.barracks = 1;
+  return buildings;
+}
+
 export function createInitialWorld(): World {
   const regions: Record<string, Region> = {};
   for (const idx of keepIndices) {
@@ -141,7 +150,7 @@ export function createInitialWorld(): World {
       troops: stats.troops,
       income: stats.income,
       troopCap: stats.troopCap,
-      buildings: emptyBuildings(),
+      buildings: startingBuildings(owner),
     };
   }
 

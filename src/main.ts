@@ -3,7 +3,14 @@ import { type World, loadGame, saveGame, clearSave, offlineSecondsSince } from "
 import { createInitialWorld } from "./game/world";
 import { tickResources, checkVictoryDefeat, runAiTurn, attack, attackableTargets, upgradeBuilding } from "./game/engine";
 import { MapRenderer } from "./ui/map";
-import { renderResourceBar, renderNationList, renderSelection, renderOverlay, type SelectionState } from "./ui/hud";
+import {
+  renderResourceBar,
+  renderNationList,
+  renderSelection,
+  renderOverlay,
+  updateAttackEstimate,
+  type SelectionState,
+} from "./ui/hud";
 
 const AI_ACTION_INTERVAL_TICKS = 3;
 const AUTOSAVE_INTERVAL_TICKS = 15;
@@ -118,6 +125,7 @@ document.addEventListener("input", (event) => {
     selection.attackFraction = Number(target.value);
     const label = document.getElementById("attack-fraction-label");
     if (label) label.textContent = `${selection.attackFraction}%`;
+    updateAttackEstimate(world, selection);
   }
 });
 

@@ -18,19 +18,25 @@ Komplett clientseitig (kein Server nötig), Spielstand liegt im Browser
 - Jedes eigene Land generiert automatisch Gold pro Sekunde — auch während du
   nicht spielst (beim nächsten Laden wird die vergangene Zeit nachgerechnet,
   gedeckelt auf 12 Stunden).
-- Truppen werden **nicht gekauft**, sondern in einer **Kaserne ausgebildet**:
-  ohne Kaserne wächst die Truppenzahl eines Landes gar nicht von selbst. Baue
-  eine Kaserne, um dort laufend Truppen auszubilden (kostet fortlaufend Gold
-  pro ausgebildeter Truppe) — höhere Kasernen-Stufen bilden schneller aus
-  *und* erhöhen die Truppenkapazität. Erobertst du ein fremdes Land, gehört
-  dir auch dessen Kaserne (und umgekehrt: verlierst du ein Land, verlierst du
-  die Kaserne dort mit).
+- Truppen werden **nicht gekauft**, sondern in einer **Kaserne ausgebildet**.
+  Jedes Startland (deins wie die der KI) hat von Anfang an eine Kaserne Stufe
+  1, bildet also sofort Truppen aus (kostet fortlaufend Gold pro
+  ausgebildeter Truppe) — höhere Kasernen-Stufen bilden schneller aus *und*
+  erhöhen die Truppenkapazität. Eroberst du ein fremdes Land ohne eigene
+  Kaserne, musst du dort erst eine bauen, damit es Truppen nachzieht.
+  Erobertst du ein fremdes Land mit Kaserne, gehört dir auch diese Kaserne
+  (und umgekehrt: verlierst du ein Land, verlierst du die Kaserne dort mit).
 - Weitere **Infrastruktur** in einem eigenen Land: Wirtschaft (+25 %
   Gold/Stufe), Festung (+20 % Verteidigung/Stufe), je bis Stufe 3.
+- **Land mit der Maus berühren** zeigt sofort ein Tooltip mit Besitzer,
+  aktueller Truppenzahl und Einkommen — so siehst du vor einem Angriff genau,
+  wie stark das Zielland gerade ist, ohne es erst anklicken zu müssen.
 - Klicke ein eigenes Land an, dann ein angrenzendes fremdes Land, um einen
-  Angriff vorzubereiten. Der Schieberegler bestimmt, wie viel Prozent der
-  stationierten Truppen du einsetzt — Vorsicht: Wer sein Grenzland leer
-  räumt, riskiert einen sofortigen Gegenangriff der KI.
+  Angriff vorzubereiten. Das Angriffspanel zeigt eine grobe
+  **Erfolgschancen-Einschätzung** (Angriffsstärke vs. Verteidigung) direkt
+  neben dem Schieberegler, der bestimmt, wie viel Prozent der stationierten
+  Truppen du einsetzt — Vorsicht: Wer sein Grenzland leer räumt, riskiert
+  einen sofortigen Gegenangriff der KI.
 - Sieg: Du kontrollierst 50 % aller Länder. Niederlage: Du verlierst dein
   letztes Land.
 - Fünf KI-Nationen (Frankreich, Russland, China, USA, Arabische Liga) greifen

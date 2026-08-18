@@ -4,6 +4,7 @@ import {
   MAX_BUILDING_LEVEL,
   TRAINING_GOLD_COST_PER_TROOP,
   buildingCost,
+  getEffectiveDefensePower,
   getEffectiveIncome,
   getEffectiveTroopCap,
   getTrainingRatePerSecond,
@@ -26,18 +27,20 @@ export function renderResourceBar(el: HTMLElement, world: World): void {
   const playerRegions = Object.values(world.regions).filter((r) => r.owner === "player");
   const totalTroops = playerRegions.reduce((sum, r) => sum + r.troops, 0);
   const totalIncome = playerRegions.reduce((sum, r) => sum + getEffectiveIncome(r), 0);
+  const worldShare = ((playerRegions.length / TOTAL_REGION_COUNT) * 100).toFixed(1);
 
   el.innerHTML = `
     <span class="res">💰 ${fmt(player?.gold ?? 0)} Gold <small>(+${totalIncome.toFixed(1)}/s)</small></span>
     <span class="res">⚔️ ${fmt(totalTroops)} Truppen</span>
-    <span class="res">🗺️ ${playerRegions.length} / ${TOTAL_REGION_COUNT} Länder</span>
+    <span class="res">🗺️ ${playerRegions.length} / ${TOTAL_REGION_COUNT} Länder <small>(${worldShare}%)</small></span>
   `;
 }
 
 export function renderNationList(el: HTMLElement, world: World): void {
   const rows = Object.values(world.nations)
-    .map((nation) => {
-      const count = Object.values(world.regions).filter((r) => r.owner === nation.id).length;
+    .map((nation) => ({ nation, count: Object.values(world.regions).filter((r) => r.owner === nation.id).length }))
+    .sort((a, b) => b.count - a.count)
+    .map(({ nation, count }) => {
       const statusClass = nation.defeated ? "defeated" : "";
       return `
         <div class="nation-row ${statusClass}">
@@ -111,6 +114,7 @@ export function renderSelection(el: HTMLElement, actionEl: HTMLElement, world: W
             Einsatz: <span id="attack-fraction-label">${selection.attackFraction}%</span>
             <input type="range" id="attack-fraction" min="10" max="100" step="5" value="${selection.attackFraction}" data-action="set-fraction" />
           </label>
+          <div id="attack-estimate">${buildAttackEstimateHtml(from, to, selection.attackFraction)}</div>
           <button data-action="attack" class="attack-btn">⚔️ Angriff starten</button>
         </div>
       `;
@@ -120,6 +124,49 @@ export function renderSelection(el: HTMLElement, actionEl: HTMLElement, world: W
   }
 
   actionEl.innerHTML = actionsHtml;
+}
+
+/**
+ * Rough attack-odds estimate shown in the attack panel: attacker troops
+ * (given the current slider %) vs. the defender's effective defense power
+ * (troops × neutral/fortress bonuses). The real combat roll uses a random
+ * ±15% swing on both sides, so this ratio is a good average-case indicator,
+ * not an exact guarantee.
+ */
+function buildAttackEstimateHtml(from: World["regions"][string], to: World["regions"][string], attackFraction: number): string {
+  const attackTroops = Math.max(1, Math.floor(from.troops * (attackFraction / 100)));
+  const defensePower = getEffectiveDefensePower(to);
+  const ratio = defensePower > 0 ? attackTroops / defensePower : Infinity;
+
+  let label: string;
+  let cls: string;
+  if (ratio >= 1.3) {
+    label = "Gute Chancen ✅";
+    cls = "est-good";
+  } else if (ratio >= 0.9) {
+    label = "Knapp — Ausgang ungewiss ⚠️";
+    cls = "est-risky";
+  } else {
+    label = "Schlechte Chancen ❌";
+    cls = "est-bad";
+  }
+
+  return `<p class="attack-estimate ${cls}">Deine Angriffsstärke: ${fmt(attackTroops)} · Verteidigung: ${fmt(defensePower)}<br>${label}</p>`;
+}
+
+/**
+ * Lightweight update for just the attack-odds line, called while the user
+ * drags the attack-fraction slider. Deliberately does NOT touch innerHTML of
+ * the whole selection panel — that would recreate the <input type="range">
+ * mid-drag and break the gesture the user is currently performing.
+ */
+export function updateAttackEstimate(world: World, selection: SelectionState): void {
+  if (!selection.fromId || !selection.toId) return;
+  const from = world.regions[selection.fromId];
+  const to = world.regions[selection.toId];
+  const el = document.getElementById("attack-estimate");
+  if (!from || !to || !el) return;
+  el.innerHTML = buildAttackEstimateHtml(from, to, selection.attackFraction);
 }
 
 function renderBuildingRows(region: World["regions"][string], gold: number): string {

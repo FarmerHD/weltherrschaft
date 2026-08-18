@@ -3,8 +3,8 @@ import { NEUTRAL_DEFENSE_BONUS, TOTAL_REGION_COUNT } from "./world";
 
 /** Gold cost consumed per troop trained by a barracks. */
 export const TRAINING_GOLD_COST_PER_TROOP = 4;
-/** Troops trained per second, per barracks level (level 1 = one troop every 20s, level 3 three times as fast). */
-export const TRAINING_RATE_PER_BARRACKS_LEVEL = 1 / 20;
+/** Troops trained per second, per barracks level (level 1 = one troop every 8s, level 3 three times as fast). */
+export const TRAINING_RATE_PER_BARRACKS_LEVEL = 1 / 8;
 /** Fraction of countries the player must control to win. Lower than the old 60%
  *  since the real-world map has ~176 countries instead of 44 macro-regions. */
 const VICTORY_FRACTION = 0.5;
@@ -65,6 +65,11 @@ export function getTrainingRatePerSecond(region: Region): number {
 
 function getFortressMultiplier(region: Region): number {
   return 1 + BUILDING_CONFIG.fortress.bonusPerLevel * region.buildings.fortress;
+}
+
+/** Effective defense power (troops × neutral bonus × fortress bonus) — exported so the UI can show attack estimates. */
+export function getEffectiveDefensePower(region: Region): number {
+  return regionDefensePower(region);
 }
 
 /**

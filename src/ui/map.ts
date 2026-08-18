@@ -4,6 +4,7 @@ import { geoNaturalEarth1, geoPath, type GeoPath, type GeoProjection } from "d3-
 import type { FeatureCollection } from "geojson";
 import { NEUTRAL, type World } from "../game/state";
 import { COUNTRY_FEATURES, type CountryFeature } from "../game/world";
+import { getEffectiveIncome } from "../game/engine";
 
 const WIDTH = 1000;
 const HEIGHT = 520;
@@ -28,14 +29,19 @@ export class MapRenderer {
   private zoomLayer: Selection<SVGGElement, unknown, null, undefined>;
   private paths = new Map<string, PathSelection>();
   private zoomBehavior: ZoomBehavior<SVGSVGElement, unknown>;
+  private tooltip: Selection<HTMLDivElement, unknown, null, undefined>;
+  private currentWorld: World | null = null;
+  private currentSelection: MapSelection = { fromId: null, attackableIds: [] };
 
-  constructor(container: HTMLElement, private onRegionClick: (regionId: string) => void) {
+  constructor(private container: HTMLElement, private onRegionClick: (regionId: string) => void) {
     this.svg = select(container)
       .append("svg")
       .attr("viewBox", `0 0 ${WIDTH} ${HEIGHT}`)
       .attr("class", "world-map");
 
     this.zoomLayer = this.svg.append("g").attr("class", "zoom-layer");
+
+    this.tooltip = select(container).append("div").attr("class", "map-tooltip").style("display", "none");
 
     // The extent is set explicitly in viewBox units (not CSS pixels) so pan/
     // zoom math stays correct no matter how large the SVG is actually
@@ -71,9 +77,11 @@ export class MapRenderer {
         .attr("d", pathGenerator(feature) ?? "")
         .attr("class", "country")
         .style("cursor", "pointer")
-        .on("click", () => this.onRegionClick(id));
+        .on("click", () => this.onRegionClick(id))
+        .on("mouseenter", (event: MouseEvent) => this.showTooltip(event, id))
+        .on("mousemove", (event: MouseEvent) => this.positionTooltip(event))
+        .on("mouseleave", () => this.hideTooltip());
 
-      path.append("title").text(world.regions[id].name);
       this.paths.set(id, path);
     }
 
@@ -82,6 +90,9 @@ export class MapRenderer {
 
   /** Cheap per-tick refresh: fill color + selection/attackable highlighting. */
   update(world: World, selection: MapSelection): void {
+    this.currentWorld = world;
+    this.currentSelection = selection;
+
     for (const [id, path] of this.paths) {
       const region = world.regions[id];
       if (!region) continue;
@@ -92,6 +103,45 @@ export class MapRenderer {
       path.classed("is-attackable", selection.attackableIds.includes(id));
       path.classed("is-player", region.owner === "player");
     }
+  }
+
+  /**
+   * Custom hover tooltip (replaces the old static native <title>, which only
+   * ever showed the country name and never updated as troops/ownership
+   * changed). Shows live troop count, owner and income — this is what lets
+   * you check how strong a country you might attack is, just by hovering it,
+   * without first clicking it.
+   */
+  private showTooltip(event: MouseEvent, id: string): void {
+    const world = this.currentWorld;
+    const region = world?.regions[id];
+    if (!world || !region) return;
+
+    const ownerName = region.owner === NEUTRAL ? "Neutral" : (world.nations[region.owner]?.name ?? region.owner);
+    const troops = Math.floor(region.troops);
+    const income = getEffectiveIncome(region).toFixed(1);
+    const isAttackable = this.currentSelection.attackableIds.includes(id);
+
+    this.tooltip.html(
+      `<strong>${region.name}</strong><br>` +
+        `Besitzer: ${ownerName}<br>` +
+        `Truppen: ${troops}<br>` +
+        `Einkommen: ${income} Gold/s` +
+        (isAttackable ? `<br><span class="tooltip-hint">⚔️ angreifbar</span>` : ""),
+    );
+    this.positionTooltip(event);
+    this.tooltip.style("display", "block");
+  }
+
+  private positionTooltip(event: MouseEvent): void {
+    const rect = this.container.getBoundingClientRect();
+    const x = event.clientX - rect.left + 14;
+    const y = event.clientY - rect.top + 14;
+    this.tooltip.style("left", `${x}px`).style("top", `${y}px`);
+  }
+
+  private hideTooltip(): void {
+    this.tooltip.style("display", "none");
   }
 
   /** Resets pan/zoom back to the initial whole-world view. */

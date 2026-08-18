@@ -1,10 +1,13 @@
 import { NEUTRAL, type BuildingType, type NationId, type Region, type World } from "./state";
 import { NEUTRAL_DEFENSE_BONUS, TOTAL_REGION_COUNT } from "./world";
 
-/** Gold cost consumed per troop trained by a barracks. */
-export const TRAINING_GOLD_COST_PER_TROOP = 4;
-/** Troops trained per second, per barracks level (level 1 = one troop every 8s, level 3 three times as fast). Feeds the nation's shared army pool, not any one region. */
-export const TRAINING_RATE_PER_BARRACKS_LEVEL = 1 / 8;
+/** Gold cost consumed per troop trained by a barracks. Halved from 4 — at
+ *  the higher training rate below, 4 gold/troop would have made gold (not
+ *  the barracks rate) the real bottleneck, quietly undercutting the speed-up. */
+export const TRAINING_GOLD_COST_PER_TROOP = 2;
+/** Troops trained per second, per barracks level (level 1 = one troop every 2s, level 3 three times as fast).
+ *  4x the previous rate (was 1/8) — feeds the nation's shared army pool, not any one region. */
+export const TRAINING_RATE_PER_BARRACKS_LEVEL = 1 / 2;
 /** Fraction of countries the player must control to win. Lower than the old 60%
  *  since the real-world map has ~176 countries instead of 44 macro-regions. */
 const VICTORY_FRACTION = 0.5;

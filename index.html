@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Weltherrschaft &mdash; Idle-Eroberungsspiel</title>
+  </head>
+  <body>
+    <div id="app">
+      <header id="top-bar">
+        <h1>🌍 Weltherrschaft</h1>
+        <div id="resource-bar"></div>
+      </header>
+
+      <main id="game-area">
+        <section id="map-panel">
+          <div id="map-container"></div>
+        </section>
+
+        <aside id="side-panel">
+          <div id="selection-info">
+            <p class="hint">Klicke auf eine Region, um Details zu sehen.</p>
+          </div>
+          <div id="action-panel"></div>
+          <div id="nation-list"></div>
+        </aside>
+      </main>
+
+      <footer id="bottom-bar">
+        <button id="save-btn">Speichern</button>
+        <button id="reset-btn">Neues Spiel</button>
+        <span id="save-status"></span>
+      </footer>
+
+      <div id="overlay" class="hidden"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

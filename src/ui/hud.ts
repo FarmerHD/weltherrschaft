@@ -1,5 +1,13 @@
 import { NEUTRAL, type NationId, type World } from "../game/state";
-import { TROOP_GOLD_COST } from "../game/engine";
+import {
+  BUILDING_CONFIG,
+  MAX_BUILDING_LEVEL,
+  TRAINING_GOLD_COST_PER_TROOP,
+  buildingCost,
+  getEffectiveIncome,
+  getEffectiveTroopCap,
+  getTrainingRatePerSecond,
+} from "../game/engine";
 import { TOTAL_REGION_COUNT } from "../game/world";
 
 export interface SelectionState {
@@ -17,12 +25,12 @@ export function renderResourceBar(el: HTMLElement, world: World): void {
   const player = world.nations["player"];
   const playerRegions = Object.values(world.regions).filter((r) => r.owner === "player");
   const totalTroops = playerRegions.reduce((sum, r) => sum + r.troops, 0);
-  const totalIncome = playerRegions.reduce((sum, r) => sum + r.income, 0);
+  const totalIncome = playerRegions.reduce((sum, r) => sum + getEffectiveIncome(r), 0);
 
   el.innerHTML = `
     <span class="res">💰 ${fmt(player?.gold ?? 0)} Gold <small>(+${totalIncome.toFixed(1)}/s)</small></span>
     <span class="res">⚔️ ${fmt(totalTroops)} Truppen</span>
-    <span class="res">🗺️ ${playerRegions.length} / ${TOTAL_REGION_COUNT} Regionen</span>
+    <span class="res">🗺️ ${playerRegions.length} / ${TOTAL_REGION_COUNT} Länder</span>
   `;
 }
 
@@ -54,7 +62,7 @@ export function renderSelection(el: HTMLElement, actionEl: HTMLElement, world: W
   }
 
   if (!selection.fromId) {
-    el.innerHTML += `<p class="hint">Klicke auf eine deiner Regionen, um Truppen zu verschieben oder anzugreifen.</p>`;
+    el.innerHTML += `<p class="hint">Klicke auf ein Land, um es auszuwählen — eigene Länder zeigen Ausbau-Optionen, fremde angrenzende Länder können angegriffen werden.</p>`;
     actionEl.innerHTML = "";
     return;
   }
@@ -65,12 +73,18 @@ export function renderSelection(el: HTMLElement, actionEl: HTMLElement, world: W
     return;
   }
   const fromOwnerName = ownerName(world, from.owner);
+  const trainingRate = getTrainingRatePerSecond(from);
+  const trainingText =
+    trainingRate > 0
+      ? `${(trainingRate * 60).toFixed(1)} Truppen/Min <small>(${TRAINING_GOLD_COST_PER_TROOP} Gold/Truppe, Kaserne Stufe ${from.buildings.barracks})</small>`
+      : `<span class="no-training">keine Kaserne — Truppen wachsen nicht von selbst</span>`;
   el.innerHTML += `
     <div class="region-detail">
       <h3>${from.name}</h3>
       <p>Besitzer: <strong>${fromOwnerName}</strong></p>
-      <p>Truppen: <strong>${fmt(from.troops)}</strong> / Kapazität ${fmt(from.troopCap)}</p>
-      <p>Einkommen: <strong>${from.income.toFixed(1)}</strong> Gold/s</p>
+      <p>Truppen: <strong>${fmt(from.troops)}</strong> / Kapazität ${fmt(getEffectiveTroopCap(from))}</p>
+      <p>Ausbildung: ${trainingText}</p>
+      <p>Einkommen: <strong>${getEffectiveIncome(from).toFixed(1)}</strong> Gold/s</p>
     </div>
   `;
 
@@ -80,10 +94,8 @@ export function renderSelection(el: HTMLElement, actionEl: HTMLElement, world: W
     const player = world.nations["player"];
     actionsHtml += `
       <div class="action-group">
-        <h4>Truppen kaufen (${TROOP_GOLD_COST} Gold/Truppe)</h4>
-        <button data-action="buy" data-amount="20">+5 (20 Gold)</button>
-        <button data-action="buy" data-amount="80">+20 (80 Gold)</button>
-        <button data-action="buy" data-amount="${Math.floor((player?.gold ?? 0))}">Alles Gold ausgeben</button>
+        <h4>Infrastruktur</h4>
+        ${renderBuildingRows(from, player?.gold ?? 0)}
       </div>
     `;
   }
@@ -104,10 +116,38 @@ export function renderSelection(el: HTMLElement, actionEl: HTMLElement, world: W
       `;
     }
   } else if (from.owner === "player") {
-    actionsHtml += `<p class="hint">Klicke eine angrenzende, nicht eigene Region an, um sie anzugreifen.</p>`;
+    actionsHtml += `<p class="hint">Klicke ein angrenzendes, nicht eigenes Land an, um es anzugreifen.</p>`;
   }
 
   actionEl.innerHTML = actionsHtml;
+}
+
+function renderBuildingRows(region: World["regions"][string], gold: number): string {
+  return (Object.keys(BUILDING_CONFIG) as Array<keyof typeof BUILDING_CONFIG>)
+    .map((type) => {
+      const config = BUILDING_CONFIG[type];
+      const level = region.buildings[type];
+      const maxed = level >= MAX_BUILDING_LEVEL;
+      const cost = buildingCost(type, level);
+      const canAfford = gold >= cost;
+      const dots = Array.from({ length: MAX_BUILDING_LEVEL }, (_, i) => (i < level ? "●" : "○")).join("");
+
+      return `
+        <div class="building-row">
+          <div class="building-info">
+            <span class="building-name">${config.name}</span>
+            <span class="building-level" title="Stufe ${level}/${MAX_BUILDING_LEVEL}">${dots}</span>
+          </div>
+          <div class="building-desc">${config.description}</div>
+          <button
+            data-action="upgrade-building"
+            data-building="${type}"
+            ${maxed || !canAfford ? "disabled" : ""}
+          >${maxed ? "Maximal ausgebaut" : `Ausbauen (${cost} Gold)`}</button>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 function ownerName(world: World, owner: NationId): string {
@@ -127,14 +167,14 @@ export function renderOverlay(el: HTMLElement, world: World): void {
     el.innerHTML = `
       <div class="overlay-card">
         <h2>🏆 Weltherrschaft erreicht!</h2>
-        <p>Du kontrollierst ${playerRegions} von ${TOTAL_REGION_COUNT} Regionen.</p>
+        <p>Du kontrollierst ${playerRegions} von ${TOTAL_REGION_COUNT} Ländern.</p>
         <button data-action="restart">Neues Spiel</button>
       </div>`;
   } else {
     el.innerHTML = `
       <div class="overlay-card">
         <h2>💀 Dein Reich ist gefallen</h2>
-        <p>Alle deine Regionen wurden erobert.</p>
+        <p>Alle deine Länder wurden erobert.</p>
         <button data-action="restart">Neu versuchen</button>
       </div>`;
   }

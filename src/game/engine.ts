@@ -1,12 +1,13 @@
-import { NEUTRAL, type NationId, type Region, type World } from "./state";
+import { NEUTRAL, type BuildingType, type NationId, type Region, type World } from "./state";
 import { NEUTRAL_DEFENSE_BONUS, TOTAL_REGION_COUNT } from "./world";
 
-/** Gold cost to buy a single troop via reinforcement. */
-export const TROOP_GOLD_COST = 4;
-/** Seconds of passive regeneration needed to go from 0 troops to a region's cap. */
-const REGEN_TIME_TO_FULL_SECONDS = 240;
-/** Fraction of total regions the player must control to win. */
-const VICTORY_FRACTION = 0.6;
+/** Gold cost consumed per troop trained by a barracks. */
+export const TRAINING_GOLD_COST_PER_TROOP = 4;
+/** Troops trained per second, per barracks level (level 1 = one troop every 20s, level 3 three times as fast). */
+export const TRAINING_RATE_PER_BARRACKS_LEVEL = 1 / 20;
+/** Fraction of countries the player must control to win. Lower than the old 60%
+ *  since the real-world map has ~176 countries instead of 44 macro-regions. */
+const VICTORY_FRACTION = 0.5;
 /** AI won't commit an attack unless its force is at least this multiple of the target's estimated defense. */
 const AI_SAFETY_MARGIN = 1.15;
 /** AI regions below this troop count are considered too weak to launch an attack from. */
@@ -23,12 +24,83 @@ export interface CombatResult {
   survivors: number;
 }
 
-function regionDefensePower(region: Region): number {
-  const bonus = region.owner === NEUTRAL ? NEUTRAL_DEFENSE_BONUS : 1;
-  return region.troops * bonus;
+// --- Infrastructure & military buildings --------------------------------
+// Three simple building types per region, levels 0-3. Base stats on Region
+// stay untouched; effective values are derived here so save data stays
+// simple and the bonuses are easy to tune from one place.
+
+export const MAX_BUILDING_LEVEL = 3;
+
+interface BuildingConfig {
+  name: string;
+  description: string;
+  baseCost: number;
+  /** Bonus applied per level, e.g. 0.25 = +25% per level. */
+  bonusPerLevel: number;
 }
 
-/** Advances gold and passive troop regeneration for every region/nation by `deltaSeconds`. */
+export const BUILDING_CONFIG: Record<BuildingType, BuildingConfig> = {
+  economy: { name: "Wirtschaft", description: "+25% Goldeinkommen pro Stufe", baseCost: 60, bonusPerLevel: 0.25 },
+  barracks: { name: "Kaserne", description: "Bildet Truppen aus (schneller & mehr Kapazität pro Stufe)", baseCost: 80, bonusPerLevel: 0.3 },
+  fortress: { name: "Festung", description: "+20% Verteidigung pro Stufe", baseCost: 100, bonusPerLevel: 0.2 },
+};
+
+/** Gold cost to go from the current level to the next one (linear scaling). */
+export function buildingCost(type: BuildingType, currentLevel: number): number {
+  return BUILDING_CONFIG[type].baseCost * (currentLevel + 1);
+}
+
+export function getEffectiveIncome(region: Region): number {
+  return region.income * (1 + BUILDING_CONFIG.economy.bonusPerLevel * region.buildings.economy);
+}
+
+export function getEffectiveTroopCap(region: Region): number {
+  return region.troopCap * (1 + BUILDING_CONFIG.barracks.bonusPerLevel * region.buildings.barracks);
+}
+
+/** Troops per second a region's barracks can train — 0 if it has no barracks yet. */
+export function getTrainingRatePerSecond(region: Region): number {
+  return region.buildings.barracks * TRAINING_RATE_PER_BARRACKS_LEVEL;
+}
+
+function getFortressMultiplier(region: Region): number {
+  return 1 + BUILDING_CONFIG.fortress.bonusPerLevel * region.buildings.fortress;
+}
+
+/**
+ * Spends gold to upgrade `buildingType` in `regionId` by one level, if the
+ * nation owns the region, hasn't maxed it out, and can afford it. Returns
+ * true if the upgrade happened.
+ */
+export function upgradeBuilding(world: World, nationId: NationId, regionId: string, buildingType: BuildingType): boolean {
+  const region = world.regions[regionId];
+  const nation = world.nations[nationId];
+  if (!region || !nation || region.owner !== nationId) return false;
+
+  const currentLevel = region.buildings[buildingType];
+  if (currentLevel >= MAX_BUILDING_LEVEL) return false;
+
+  const cost = buildingCost(buildingType, currentLevel);
+  if (nation.gold < cost) return false;
+
+  nation.gold -= cost;
+  region.buildings[buildingType] = currentLevel + 1;
+  return true;
+}
+
+function regionDefensePower(region: Region): number {
+  const neutralBonus = region.owner === NEUTRAL ? NEUTRAL_DEFENSE_BONUS : 1;
+  return region.troops * neutralBonus * getFortressMultiplier(region);
+}
+
+/**
+ * Advances gold income and barracks troop training for every region/nation
+ * by `deltaSeconds`. There is no manual "buy troops" anymore — a region only
+ * grows its garrison if it has a barracks (level 1+), at a rate that scales
+ * with the barracks level, and training is paid for continuously out of the
+ * owning nation's gold. If gold runs out mid-tick, training slows down
+ * proportionally instead of going negative or stalling entirely.
+ */
 export function tickResources(world: World, deltaSeconds: number): void {
   if (deltaSeconds <= 0) return;
   for (const region of Object.values(world.regions)) {
@@ -36,11 +108,18 @@ export function tickResources(world: World, deltaSeconds: number): void {
     const nation = world.nations[region.owner];
     if (!nation || nation.defeated) continue;
 
-    nation.gold += region.income * deltaSeconds;
+    nation.gold += getEffectiveIncome(region) * deltaSeconds;
 
-    if (region.troops < region.troopCap) {
-      const regenPerSecond = region.troopCap / REGEN_TIME_TO_FULL_SECONDS;
-      region.troops = Math.min(region.troopCap, region.troops + regenPerSecond * deltaSeconds);
+    const trainingRate = getTrainingRatePerSecond(region);
+    const effectiveCap = getEffectiveTroopCap(region);
+    if (trainingRate > 0 && region.troops < effectiveCap) {
+      const desiredTroops = Math.min(trainingRate * deltaSeconds, effectiveCap - region.troops);
+      const goldNeeded = desiredTroops * TRAINING_GOLD_COST_PER_TROOP;
+      const affordableFraction = goldNeeded > 0 ? Math.min(1, nation.gold / goldNeeded) : 1;
+      const trainedTroops = desiredTroops * affordableFraction;
+
+      region.troops += trainedTroops;
+      nation.gold -= trainedTroops * TRAINING_GOLD_COST_PER_TROOP;
     }
   }
   world.tick += 1;
@@ -114,21 +193,6 @@ export function attack(world: World, fromId: string, toId: string, nationId: Nat
   };
 }
 
-/** Spends up to `goldAmount` gold buying troops into `regionId` for `nationId`. Returns troops actually bought. */
-export function reinforceRegion(world: World, nationId: NationId, regionId: string, goldAmount: number): number {
-  const region = world.regions[regionId];
-  const nation = world.nations[nationId];
-  if (!region || !nation || region.owner !== nationId) return 0;
-
-  const affordableGold = Math.max(0, Math.min(goldAmount, nation.gold));
-  const troopsBought = Math.floor(affordableGold / TROOP_GOLD_COST);
-  if (troopsBought <= 0) return 0;
-
-  nation.gold -= troopsBought * TROOP_GOLD_COST;
-  region.troops += troopsBought;
-  return troopsBought;
-}
-
 function markDefeatedNations(world: World): void {
   const ownedCounts = new Map<string, number>();
   for (const region of Object.values(world.regions)) {
@@ -159,8 +223,9 @@ export function checkVictoryDefeat(world: World): void {
 /**
  * Very small rule-based AI: for the given nation, find its single best attack
  * opportunity (an adjacent region it can plausibly beat) and take it. If none
- * is found, reinforce its weakest border region instead. Called periodically
- * per-nation from the game loop, at most one action per call.
+ * is found, invest in a barracks in its weakest border region instead (the
+ * AI trains troops the same way the player does — no shortcuts). Called
+ * periodically per-nation from the game loop, at most one action per call.
  */
 export function runAiTurn(world: World, nationId: NationId): CombatResult | null {
   const nation = world.nations[nationId];
@@ -192,11 +257,12 @@ export function runAiTurn(world: World, nationId: NationId): CombatResult | null
     return attack(world, bestAttack.from.id, bestAttack.to.id, nationId, 0.7);
   }
 
-  // No good attack available: reinforce the border region with the weakest garrison.
+  // No good attack available: invest in the barracks of the border region with
+  // the weakest garrison, so it can start (or keep) training troops there.
   const borderRegions = ownRegions.filter((r) => r.neighbors.some((n) => world.regions[n]?.owner !== nationId));
   const weakest = (borderRegions.length > 0 ? borderRegions : ownRegions).sort((a, b) => a.troops - b.troops)[0];
-  if (weakest && nation.gold >= TROOP_GOLD_COST) {
-    reinforceRegion(world, nationId, weakest.id, nation.gold * 0.5);
+  if (weakest) {
+    upgradeBuilding(world, nationId, weakest.id, "barracks");
   }
   return null;
 }

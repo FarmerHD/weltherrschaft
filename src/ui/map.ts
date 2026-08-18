@@ -1,4 +1,9 @@
+import { select, type Selection } from "d3-selection";
+import { zoom, zoomIdentity, type D3ZoomEvent, type ZoomBehavior } from "d3-zoom";
+import { geoNaturalEarth1, geoPath, type GeoPath, type GeoProjection } from "d3-geo";
+import type { FeatureCollection } from "geojson";
 import { NEUTRAL, type World } from "../game/state";
+import { COUNTRY_FEATURES, type CountryFeature } from "../game/world";
 
 const WIDTH = 1000;
 const HEIGHT = 520;
@@ -9,117 +14,88 @@ export interface MapSelection {
   attackableIds: string[];
 }
 
-function project(lat: number, lon: number): { x: number; y: number } {
-  const x = ((lon + 180) / 360) * WIDTH;
-  const y = ((90 - lat) / 180) * HEIGHT;
-  return { x, y };
-}
+const featureCollection: FeatureCollection = { type: "FeatureCollection", features: COUNTRY_FEATURES };
 
-function nodeRadius(troopCap: number): number {
-  return 10 + troopCap / 11;
-}
+// geoNaturalEarth1 gives a pleasant, low-distortion whole-world view (the
+// classic "textbook" world map look) rather than Mercator's polar stretching.
+const projection: GeoProjection = geoNaturalEarth1().fitSize([WIDTH, HEIGHT], featureCollection);
+const pathGenerator: GeoPath = geoPath(projection);
 
-const SVG_NS = "http://www.w3.org/2000/svg";
+type PathSelection = Selection<SVGPathElement, unknown, null, undefined>;
 
 export class MapRenderer {
-  private svg: SVGSVGElement;
-  private nodeGroups = new Map<string, SVGGElement>();
-  private circles = new Map<string, SVGCircleElement>();
-  private troopLabels = new Map<string, SVGTextElement>();
+  private svg: Selection<SVGSVGElement, unknown, null, undefined>;
+  private zoomLayer: Selection<SVGGElement, unknown, null, undefined>;
+  private paths = new Map<string, PathSelection>();
+  private zoomBehavior: ZoomBehavior<SVGSVGElement, unknown>;
 
   constructor(container: HTMLElement, private onRegionClick: (regionId: string) => void) {
-    this.svg = document.createElementNS(SVG_NS, "svg");
-    this.svg.setAttribute("viewBox", `0 0 ${WIDTH} ${HEIGHT}`);
-    this.svg.setAttribute("class", "world-map");
-    container.appendChild(this.svg);
+    this.svg = select(container)
+      .append("svg")
+      .attr("viewBox", `0 0 ${WIDTH} ${HEIGHT}`)
+      .attr("class", "world-map");
+
+    this.zoomLayer = this.svg.append("g").attr("class", "zoom-layer");
+
+    // The extent is set explicitly in viewBox units (not CSS pixels) so pan/
+    // zoom math stays correct no matter how large the SVG is actually
+    // rendered on screen (it's scaled responsively via the viewBox).
+    this.zoomBehavior = zoom<SVGSVGElement, unknown>()
+      .scaleExtent([1, 10])
+      .extent([
+        [0, 0],
+        [WIDTH, HEIGHT],
+      ])
+      .translateExtent([
+        [0, 0],
+        [WIDTH, HEIGHT],
+      ])
+      .on("zoom", (event: D3ZoomEvent<SVGSVGElement, unknown>) => {
+        this.zoomLayer.attr("transform", event.transform.toString());
+      });
+
+    this.svg.call(this.zoomBehavior);
   }
 
-  /** Builds the SVG once: adjacency lines + one interactive node per region. */
+  /** Builds the SVG once: one clickable <path> per country, using its real geography. */
   build(world: World): void {
-    this.svg.innerHTML = "";
-    this.nodeGroups.clear();
-    this.circles.clear();
-    this.troopLabels.clear();
+    this.zoomLayer.selectAll("*").remove();
+    this.paths.clear();
 
-    const linesGroup = document.createElementNS(SVG_NS, "g");
-    linesGroup.setAttribute("class", "adjacency-lines");
-    this.svg.appendChild(linesGroup);
+    for (const feature of COUNTRY_FEATURES as CountryFeature[]) {
+      const id = String(feature.id);
+      if (!world.regions[id]) continue; // filtered out at world-gen time (e.g. Antarctica)
 
-    const drawnPairs = new Set<string>();
-    for (const region of Object.values(world.regions)) {
-      const { x: x1, y: y1 } = project(region.lat, region.lon);
-      for (const neighborId of region.neighbors) {
-        const pairKey = [region.id, neighborId].sort().join("|");
-        if (drawnPairs.has(pairKey)) continue;
-        drawnPairs.add(pairKey);
-        const neighbor = world.regions[neighborId];
-        if (!neighbor) continue;
-        const { x: x2, y: y2 } = project(neighbor.lat, neighbor.lon);
-        const line = document.createElementNS(SVG_NS, "line");
-        line.setAttribute("x1", String(x1));
-        line.setAttribute("y1", String(y1));
-        line.setAttribute("x2", String(x2));
-        line.setAttribute("y2", String(y2));
-        line.setAttribute("class", "adjacency-line");
-        linesGroup.appendChild(line);
-      }
-    }
+      const path = this.zoomLayer
+        .append("path")
+        .attr("d", pathGenerator(feature) ?? "")
+        .attr("class", "country")
+        .style("cursor", "pointer")
+        .on("click", () => this.onRegionClick(id));
 
-    const nodesGroup = document.createElementNS(SVG_NS, "g");
-    nodesGroup.setAttribute("class", "region-nodes");
-    this.svg.appendChild(nodesGroup);
-
-    for (const region of Object.values(world.regions)) {
-      const { x, y } = project(region.lat, region.lon);
-      const g = document.createElementNS(SVG_NS, "g");
-      g.setAttribute("class", "region-node");
-      g.setAttribute("transform", `translate(${x}, ${y})`);
-      g.style.cursor = "pointer";
-      g.addEventListener("click", () => this.onRegionClick(region.id));
-
-      const circle = document.createElementNS(SVG_NS, "circle");
-      circle.setAttribute("r", String(nodeRadius(region.troopCap)));
-      g.appendChild(circle);
-
-      const title = document.createElementNS(SVG_NS, "title");
-      title.textContent = region.name;
-      g.appendChild(title);
-
-      const nameLabel = document.createElementNS(SVG_NS, "text");
-      nameLabel.setAttribute("class", "region-name");
-      nameLabel.setAttribute("y", String(-nodeRadius(region.troopCap) - 5));
-      nameLabel.textContent = region.name;
-      g.appendChild(nameLabel);
-
-      const troopLabel = document.createElementNS(SVG_NS, "text");
-      troopLabel.setAttribute("class", "region-troops");
-      troopLabel.setAttribute("dy", "0.35em");
-      g.appendChild(troopLabel);
-
-      nodesGroup.appendChild(g);
-      this.nodeGroups.set(region.id, g);
-      this.circles.set(region.id, circle);
-      this.troopLabels.set(region.id, troopLabel);
+      path.append("title").text(world.regions[id].name);
+      this.paths.set(id, path);
     }
 
     this.update(world, { fromId: null, attackableIds: [] });
   }
 
-  /** Cheap per-tick refresh: colors, troop numbers, and selection highlighting. */
+  /** Cheap per-tick refresh: fill color + selection/attackable highlighting. */
   update(world: World, selection: MapSelection): void {
-    for (const region of Object.values(world.regions)) {
-      const circle = this.circles.get(region.id);
-      const troopLabel = this.troopLabels.get(region.id);
-      const g = this.nodeGroups.get(region.id);
-      if (!circle || !troopLabel || !g) continue;
+    for (const [id, path] of this.paths) {
+      const region = world.regions[id];
+      if (!region) continue;
 
-      const color = region.owner === NEUTRAL ? NEUTRAL_COLOR : world.nations[region.owner]?.color ?? NEUTRAL_COLOR;
-      circle.setAttribute("fill", color);
-      troopLabel.textContent = String(Math.floor(region.troops));
-
-      g.classList.toggle("is-selected", region.id === selection.fromId);
-      g.classList.toggle("is-attackable", selection.attackableIds.includes(region.id));
-      g.classList.toggle("is-player", region.owner === "player");
+      const color = region.owner === NEUTRAL ? NEUTRAL_COLOR : (world.nations[region.owner]?.color ?? NEUTRAL_COLOR);
+      path.attr("fill", color);
+      path.classed("is-selected", id === selection.fromId);
+      path.classed("is-attackable", selection.attackableIds.includes(id));
+      path.classed("is-player", region.owner === "player");
     }
+  }
+
+  /** Resets pan/zoom back to the initial whole-world view. */
+  resetView(): void {
+    this.svg.call(this.zoomBehavior.transform, zoomIdentity);
   }
 }

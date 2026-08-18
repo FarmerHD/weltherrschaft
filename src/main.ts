@@ -1,7 +1,7 @@
 import "./style.css";
 import { type World, loadGame, saveGame, clearSave, offlineSecondsSince } from "./game/state";
 import { createInitialWorld } from "./game/world";
-import { tickResources, checkVictoryDefeat, runAiTurn, attack, reinforceRegion, attackableTargets } from "./game/engine";
+import { tickResources, checkVictoryDefeat, runAiTurn, attack, attackableTargets, upgradeBuilding } from "./game/engine";
 import { MapRenderer } from "./ui/map";
 import { renderResourceBar, renderNationList, renderSelection, renderOverlay, type SelectionState } from "./ui/hud";
 
@@ -38,7 +38,7 @@ if (saved) {
     const minutes = Math.floor(offlineSeconds / 60);
     selection.lastMessage =
       minutes > 0
-        ? `Willkommen zurück! Während du weg warst (${minutes} Min.) haben deine Regionen weiter produziert.`
+        ? `Willkommen zurück! Während du weg warst (${minutes} Min.) haben deine Länder weiter produziert.`
         : "Willkommen zurück!";
   }
 } else {
@@ -72,17 +72,31 @@ function handleRegionClick(regionId: string): void {
   render();
 }
 
+// Reset needs care: location.reload() itself fires `beforeunload`, and the
+// autosave listener there used to unconditionally re-save the (just
+// cleared) game — silently undoing the reset. This flag makes reset win.
+let isResetting = false;
+
+function resetGame(): void {
+  if (!confirm("Aktuellen Spielstand löschen und neu starten?")) return;
+  isResetting = true;
+  clearSave();
+  location.reload();
+}
+
 document.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   const actionEl = target.closest<HTMLElement>("[data-action]");
   if (!actionEl) return;
   const action = actionEl.dataset.action;
 
-  if (action === "buy" && selection.fromId) {
-    const amount = Number(actionEl.dataset.amount ?? "0");
-    const bought = reinforceRegion(world, "player", selection.fromId, amount);
-    selection.lastMessage = bought > 0 ? `${bought} Truppen ausgehoben.` : "Nicht genug Gold.";
-    render();
+  if (action === "upgrade-building" && selection.fromId) {
+    const buildingType = actionEl.dataset.building as "economy" | "barracks" | "fortress" | undefined;
+    if (buildingType) {
+      const upgraded = upgradeBuilding(world, "player", selection.fromId, buildingType);
+      selection.lastMessage = upgraded ? "Gebäude ausgebaut." : "Ausbau nicht möglich (Gold oder Maxstufe).";
+      render();
+    }
   } else if (action === "attack" && selection.fromId && selection.toId) {
     const result = attack(world, selection.fromId, selection.toId, "player", selection.attackFraction / 100);
     if (result) {
@@ -94,10 +108,7 @@ document.addEventListener("click", (event) => {
     selection.toId = null;
     render();
   } else if (action === "restart") {
-    if (confirm("Aktuellen Spielstand löschen und neu starten?")) {
-      clearSave();
-      location.reload();
-    }
+    resetGame();
   }
 });
 
@@ -115,12 +126,7 @@ $("save-btn").addEventListener("click", () => {
   saveStatusEl.textContent = `Gespeichert um ${new Date().toLocaleTimeString("de-DE")}`;
 });
 
-$("reset-btn").addEventListener("click", () => {
-  if (confirm("Aktuellen Spielstand löschen und neu starten?")) {
-    clearSave();
-    location.reload();
-  }
-});
+$("reset-btn").addEventListener("click", resetGame);
 
 setInterval(() => {
   if (world.status === "playing") {
@@ -139,6 +145,8 @@ setInterval(() => {
   render();
 }, 1000);
 
-window.addEventListener("beforeunload", () => saveGame(world));
+window.addEventListener("beforeunload", () => {
+  if (!isResetting) saveGame(world);
+});
 
 render();

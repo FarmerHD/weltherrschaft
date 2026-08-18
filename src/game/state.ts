@@ -6,20 +6,20 @@
 export type NationId = "player" | string; // "player" or an AI nation id, e.g. "france"
 export const NEUTRAL: NationId = "neutral";
 
+export type BuildingType = "economy" | "barracks" | "fortress";
+
 export interface Region {
   id: string;
   name: string;
-  continent: string;
-  /** Projection coordinates in world-map degrees, used purely for rendering. */
-  lat: number;
-  lon: number;
   neighbors: string[];
   owner: NationId;
   troops: number;
-  /** Gold generated per second while owned. */
+  /** Base gold generated per second while owned, before building bonuses. */
   income: number;
-  /** Soft cap that passive troop regeneration approaches. */
+  /** Base soft cap that passive troop regeneration approaches, before building bonuses. */
   troopCap: number;
+  /** Building levels 0-3 each. Effects are applied via engine.ts helpers, not stored here. */
+  buildings: Record<BuildingType, number>;
 }
 
 export interface Nation {
@@ -47,8 +47,11 @@ export interface SaveGame {
   world: World;
 }
 
-const SAVE_VERSION = 1;
-const SAVE_KEY = "weltherrschaft-save-v1";
+// Bumped for the real-country map + buildings rework: old saves used
+// different region ids (slugs like "germany") and lack the buildings field,
+// so they must not be loaded into the new model.
+const SAVE_VERSION = 2;
+const SAVE_KEY = "weltherrschaft-save-v2";
 /** Cap offline simulation so leaving the tab open for days doesn't cause a huge jump. */
 const MAX_OFFLINE_SECONDS = 12 * 60 * 60;
 

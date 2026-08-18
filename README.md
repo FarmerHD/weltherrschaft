@@ -10,22 +10,32 @@ Komplett clientseitig (kein Server nötig), Spielstand liegt im Browser
 
 ## Spielprinzip
 
-- Die Karte besteht aus 44 stilisierten Weltregionen (Kontinent-Ebene, kein
-  exaktes Grenzmodell — eher wie beim Brettspiel Risk).
-- Jede eigene Region generiert automatisch Gold pro Sekunde und regeneriert
-  passiv Truppen bis zu ihrer Kapazität — auch während du nicht spielst
-  (beim nächsten Laden wird die vergangene Zeit nachgerechnet, gedeckelt auf
-  12 Stunden).
-- Mit Gold kaufst du zusätzliche Truppen in einer Region.
-- Klicke eine eigene Region an, dann eine angrenzende fremde Region, um einen
+- Echte Weltkarte mit ~175 einzelnen Ländern (Geodaten von Natural Earth via
+  `world-atlas`/`topojson-client`/`d3-geo`), Nachbarschaft automatisch aus
+  echten Landgrenzen abgeleitet (Inselstaaten bekommen automatisch die
+  nächstgelegenen Länder als See-Nachbarn, damit niemand uneinnehmbar ist).
+  Zum Zoomen/Verschieben: Mausrad bzw. Pinch-Geste, Ziehen zum Verschieben.
+- Jedes eigene Land generiert automatisch Gold pro Sekunde — auch während du
+  nicht spielst (beim nächsten Laden wird die vergangene Zeit nachgerechnet,
+  gedeckelt auf 12 Stunden).
+- Truppen werden **nicht gekauft**, sondern in einer **Kaserne ausgebildet**:
+  ohne Kaserne wächst die Truppenzahl eines Landes gar nicht von selbst. Baue
+  eine Kaserne, um dort laufend Truppen auszubilden (kostet fortlaufend Gold
+  pro ausgebildeter Truppe) — höhere Kasernen-Stufen bilden schneller aus
+  *und* erhöhen die Truppenkapazität. Erobertst du ein fremdes Land, gehört
+  dir auch dessen Kaserne (und umgekehrt: verlierst du ein Land, verlierst du
+  die Kaserne dort mit).
+- Weitere **Infrastruktur** in einem eigenen Land: Wirtschaft (+25 %
+  Gold/Stufe), Festung (+20 % Verteidigung/Stufe), je bis Stufe 3.
+- Klicke ein eigenes Land an, dann ein angrenzendes fremdes Land, um einen
   Angriff vorzubereiten. Der Schieberegler bestimmt, wie viel Prozent der
-  stationierten Truppen du einsetzt — Vorsicht: Wer sein Grenzgebiet leer
+  stationierten Truppen du einsetzt — Vorsicht: Wer sein Grenzland leer
   räumt, riskiert einen sofortigen Gegenangriff der KI.
-- Sieg: Du kontrollierst 60 % der Weltkarte. Niederlage: Du verlierst deine
-  letzte Region.
+- Sieg: Du kontrollierst 50 % aller Länder. Niederlage: Du verlierst dein
+  letztes Land.
 - Fünf KI-Nationen (Frankreich, Russland, China, USA, Arabische Liga) greifen
   eigenständig regelbasiert an: Sie suchen sich das schwächste erreichbare
-  Nachbargebiet und verstärken sonst ihre Grenzregionen.
+  Nachbarland und verstärken sonst ihre Grenzländer.
 
 ## Lokal starten
 
@@ -74,12 +84,13 @@ Falls du stattdessen eine **User-/Organisations-Seite**
 ```
 src/
   game/
-    state.ts    Typen + Speicherstand (localStorage, Offline-Fortschritt)
-    world.ts    Weltkarte: Regionen, Nachbarschaften, Start-Nationen
-    engine.ts   Spiellogik: Ressourcen-Tick, Kampf, KI, Sieg-/Niederlage-Check
+    state.ts           Typen + Speicherstand (localStorage, Offline-Fortschritt)
+    world.ts            Echte Länder aus TopoJSON, Adjazenz, Start-Nationen
+    world-atlas.d.ts    Typdeklaration für den world-atlas JSON-Import
+    engine.ts            Ressourcen-Tick, Kampf, Gebäude, KI, Sieg-/Niederlage-Check
   ui/
-    map.ts      SVG-Kartenrendering + Klick-Interaktion
-    hud.ts      Ressourcenanzeige, Aktionspanel, Nationenliste, Overlay
+    map.ts      SVG-Kartenrendering (d3-geo) + Zoom/Pan (d3-zoom) + Klicks
+    hud.ts      Ressourcenanzeige, Aktions-/Gebäudepanel, Nationenliste, Overlay
   main.ts       Verbindet Engine + UI, Game-Loop, Speichern/Laden
   style.css
 .github/workflows/deploy.yml   Automatisches Deployment nach GitHub Pages

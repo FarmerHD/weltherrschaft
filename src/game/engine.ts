@@ -3,15 +3,17 @@ import { NEUTRAL_DEFENSE_BONUS, TOTAL_REGION_COUNT } from "./world";
 
 /** Gold cost consumed per troop trained by a barracks. */
 export const TRAINING_GOLD_COST_PER_TROOP = 4;
-/** Troops trained per second, per barracks level (level 1 = one troop every 8s, level 3 three times as fast). */
+/** Troops trained per second, per barracks level (level 1 = one troop every 8s, level 3 three times as fast). Feeds the nation's shared army pool, not any one region. */
 export const TRAINING_RATE_PER_BARRACKS_LEVEL = 1 / 8;
 /** Fraction of countries the player must control to win. Lower than the old 60%
  *  since the real-world map has ~176 countries instead of 44 macro-regions. */
 const VICTORY_FRACTION = 0.5;
 /** AI won't commit an attack unless its force is at least this multiple of the target's estimated defense. */
 const AI_SAFETY_MARGIN = 1.15;
-/** AI regions below this troop count are considered too weak to launch an attack from. */
+/** AI won't attack at all unless its whole army is at least this large. */
 const AI_MIN_ATTACK_TROOPS = 10;
+/** Minimum army size needed to launch any attack at all. */
+const MIN_ATTACK_TROOPS = 2;
 
 export interface CombatResult {
   attackerNationId: NationId;
@@ -35,14 +37,19 @@ interface BuildingConfig {
   name: string;
   description: string;
   baseCost: number;
-  /** Bonus applied per level, e.g. 0.25 = +25% per level. */
+  /** Bonus applied per level, e.g. 0.25 = +25% per level. Unused for barracks — its effect is a flat rate (TRAINING_RATE_PER_BARRACKS_LEVEL), not a % bonus. */
   bonusPerLevel: number;
 }
 
 export const BUILDING_CONFIG: Record<BuildingType, BuildingConfig> = {
-  economy: { name: "Wirtschaft", description: "+25% Goldeinkommen pro Stufe", baseCost: 60, bonusPerLevel: 0.25 },
-  barracks: { name: "Kaserne", description: "Bildet Truppen aus (schneller & mehr Kapazität pro Stufe)", baseCost: 80, bonusPerLevel: 0.3 },
-  fortress: { name: "Festung", description: "+20% Verteidigung pro Stufe", baseCost: 100, bonusPerLevel: 0.2 },
+  economy: { name: "Wirtschaft", description: "+25% Goldeinkommen dieses Landes pro Stufe", baseCost: 60, bonusPerLevel: 0.25 },
+  barracks: {
+    name: "Kaserne",
+    description: `Bildet Truppen für deine gesamte Armee aus (${TRAINING_GOLD_COST_PER_TROOP} Gold/Truppe) — platziere sie strategisch, mehr/höhere Kasernen überall im Land bilden zusammen schneller aus`,
+    baseCost: 80,
+    bonusPerLevel: 0,
+  },
+  fortress: { name: "Festung", description: "+20% Verteidigung dieses Landes pro Stufe", baseCost: 100, bonusPerLevel: 0.2 },
 };
 
 /** Gold cost to go from the current level to the next one (linear scaling). */
@@ -54,22 +61,27 @@ export function getEffectiveIncome(region: Region): number {
   return region.income * (1 + BUILDING_CONFIG.economy.bonusPerLevel * region.buildings.economy);
 }
 
-export function getEffectiveTroopCap(region: Region): number {
-  return region.troopCap * (1 + BUILDING_CONFIG.barracks.bonusPerLevel * region.buildings.barracks);
-}
-
-/** Troops per second a region's barracks can train — 0 if it has no barracks yet. */
-export function getTrainingRatePerSecond(region: Region): number {
-  return region.buildings.barracks * TRAINING_RATE_PER_BARRACKS_LEVEL;
-}
-
 function getFortressMultiplier(region: Region): number {
   return 1 + BUILDING_CONFIG.fortress.bonusPerLevel * region.buildings.fortress;
 }
 
-/** Effective defense power (troops × neutral bonus × fortress bonus) — exported so the UI can show attack estimates. */
-export function getEffectiveDefensePower(region: Region): number {
-  return regionDefensePower(region);
+export function getRegionsOwnedBy(world: World, nationId: NationId): Region[] {
+  return Object.values(world.regions).filter((r) => r.owner === nationId);
+}
+
+/** Total gold/s a nation earns across all of its regions. */
+export function getNationIncome(world: World, nationId: NationId): number {
+  return getRegionsOwnedBy(world, nationId).reduce((sum, r) => sum + getEffectiveIncome(r), 0);
+}
+
+/** A nation's shared troop capacity — the sum of every owned region's area-based contribution. Not affected by barracks (that only affects training speed, not the ceiling). */
+export function getNationTroopCap(world: World, nationId: NationId): number {
+  return getRegionsOwnedBy(world, nationId).reduce((sum, r) => sum + r.troopCap, 0);
+}
+
+/** Troops/second a nation's whole army trains at — the sum of every owned region's barracks level, wherever they've been built. */
+export function getNationTrainingRatePerSecond(world: World, nationId: NationId): number {
+  return getRegionsOwnedBy(world, nationId).reduce((sum, r) => sum + r.buildings.barracks * TRAINING_RATE_PER_BARRACKS_LEVEL, 0);
 }
 
 /**
@@ -93,37 +105,62 @@ export function upgradeBuilding(world: World, nationId: NationId, regionId: stri
   return true;
 }
 
-function regionDefensePower(region: Region): number {
-  const neutralBonus = region.owner === NEUTRAL ? NEUTRAL_DEFENSE_BONUS : 1;
-  return region.troops * neutralBonus * getFortressMultiplier(region);
+/**
+ * Effective defense power of a region if it were attacked right now.
+ * - A neutral region defends with its own fixed local garrison.
+ * - A nation-owned region no longer keeps a garrison of its own: it's
+ *   defended by an even share of that nation's whole shared army (troops
+ *   divided across every region it holds) — the "one army, not scattered
+ *   garrisons" model. A fortress built specifically in that region still
+ *   gives it a real, strategic local defense boost on top of that share.
+ */
+export function getEffectiveDefensePower(world: World, region: Region): number {
+  if (region.owner === NEUTRAL) {
+    return region.troops * NEUTRAL_DEFENSE_BONUS * getFortressMultiplier(region);
+  }
+  const nation = world.nations[region.owner];
+  if (!nation) return 0;
+  const regionCount = getRegionsOwnedBy(world, region.owner).length;
+  const share = regionCount > 0 ? nation.troops / regionCount : 0;
+  return share * getFortressMultiplier(region);
+}
+
+/** Raw troop count (before fortress/neutral bonuses) a region would commit if attacked — used to apply combat losses back onto the right pool afterwards. */
+function getDefendingTroopsCommitted(world: World, region: Region): number {
+  if (region.owner === NEUTRAL) return Math.floor(region.troops);
+  const nation = world.nations[region.owner];
+  if (!nation) return 0;
+  const regionCount = getRegionsOwnedBy(world, region.owner).length;
+  return regionCount > 0 ? Math.max(1, Math.round(nation.troops / regionCount)) : 0;
 }
 
 /**
- * Advances gold income and barracks troop training for every region/nation
- * by `deltaSeconds`. There is no manual "buy troops" anymore — a region only
- * grows its garrison if it has a barracks (level 1+), at a rate that scales
- * with the barracks level, and training is paid for continuously out of the
- * owning nation's gold. If gold runs out mid-tick, training slows down
- * proportionally instead of going negative or stalling entirely.
+ * Advances gold income and barracks troop training for every nation by
+ * `deltaSeconds`. Troops are trained into the nation's single shared army
+ * pool (Nation.troops), not any one region — a region only contributes to
+ * how fast that pool trains (via its own barracks level) and how big the
+ * pool's cap is (via its area-based capacity). Training is paid for
+ * continuously out of the nation's gold; if gold runs out mid-tick,
+ * training slows down proportionally instead of going negative or
+ * stalling entirely.
  */
 export function tickResources(world: World, deltaSeconds: number): void {
   if (deltaSeconds <= 0) return;
-  for (const region of Object.values(world.regions)) {
-    if (region.owner === NEUTRAL) continue;
-    const nation = world.nations[region.owner];
-    if (!nation || nation.defeated) continue;
+  for (const nation of Object.values(world.nations)) {
+    if (nation.defeated) continue;
 
-    nation.gold += getEffectiveIncome(region) * deltaSeconds;
+    const income = getNationIncome(world, nation.id);
+    nation.gold += income * deltaSeconds;
 
-    const trainingRate = getTrainingRatePerSecond(region);
-    const effectiveCap = getEffectiveTroopCap(region);
-    if (trainingRate > 0 && region.troops < effectiveCap) {
-      const desiredTroops = Math.min(trainingRate * deltaSeconds, effectiveCap - region.troops);
+    const trainingRate = getNationTrainingRatePerSecond(world, nation.id);
+    const troopCap = getNationTroopCap(world, nation.id);
+    if (trainingRate > 0 && nation.troops < troopCap) {
+      const desiredTroops = Math.min(trainingRate * deltaSeconds, troopCap - nation.troops);
       const goldNeeded = desiredTroops * TRAINING_GOLD_COST_PER_TROOP;
       const affordableFraction = goldNeeded > 0 ? Math.min(1, nation.gold / goldNeeded) : 1;
       const trainedTroops = desiredTroops * affordableFraction;
 
-      region.troops += trainedTroops;
+      nation.troops += trainedTroops;
       nation.gold -= trainedTroops * TRAINING_GOLD_COST_PER_TROOP;
     }
   }
@@ -144,28 +181,34 @@ export function canAttack(world: World, fromId: string, toId: string, nationId: 
   if (from.owner !== nationId) return false;
   if (to.owner === nationId) return false;
   if (!from.neighbors.includes(toId)) return false;
-  return from.troops >= 2;
+  const nation = world.nations[nationId];
+  return (nation?.troops ?? 0) >= MIN_ATTACK_TROOPS;
 }
 
 /**
  * Resolves an attack from `fromId` into `toId` using `fraction` (0-1] of the
- * attacking region's troops. Mutates the world in place and returns a log of
- * what happened so the UI can report it.
+ * attacking nation's whole shared army. `fromId` still has to be an owned
+ * region bordering the target — you attack via a specific stretch of your
+ * territory — but the troops committed come out of one shared pool instead
+ * of a garrison stationed in that specific region. Mutates the world in
+ * place and returns a log of what happened so the UI can report it.
  */
 export function attack(world: World, fromId: string, toId: string, nationId: NationId, fraction: number): CombatResult | null {
   if (!canAttack(world, fromId, toId, nationId)) return null;
-  const from = world.regions[fromId];
   const to = world.regions[toId];
+  const attackerNation = world.nations[nationId];
+  if (!attackerNation) return null;
 
   const clampedFraction = Math.min(1, Math.max(0.05, fraction));
-  const attackTroops = Math.max(1, Math.floor(from.troops * clampedFraction));
-  const defendTroops = Math.floor(to.troops);
+  const attackTroops = Math.max(1, Math.floor(attackerNation.troops * clampedFraction));
+  const defendTroopsCommitted = getDefendingTroopsCommitted(world, to);
   const defenderNationId = to.owner;
+  const defenderNation = defenderNationId !== NEUTRAL ? world.nations[defenderNationId] : null;
 
   const attackPower = attackTroops * (0.85 + Math.random() * 0.3);
-  const defendPower = regionDefensePower(to) * (0.85 + Math.random() * 0.3);
+  const defendPower = getEffectiveDefensePower(world, to) * (0.85 + Math.random() * 0.3);
 
-  from.troops -= attackTroops;
+  attackerNation.troops -= attackTroops;
 
   let captured: boolean;
   let survivors: number;
@@ -173,13 +216,25 @@ export function attack(world: World, fromId: string, toId: string, nationId: Nat
   if (attackPower > defendPower) {
     const ratio = defendPower / attackPower; // 0..1, how close the fight was
     survivors = Math.max(1, Math.round(attackTroops * (1 - ratio) * 0.8));
-    to.troops = survivors;
+    // No separate garrison to leave behind anymore: the surviving attackers
+    // redeploy straight back into your shared army, ready to be used again.
+    attackerNation.troops += survivors;
+    if (defenderNation) {
+      defenderNation.troops = Math.max(0, defenderNation.troops - defendTroopsCommitted);
+    }
     to.owner = nationId;
+    to.troops = 0; // unused for nation-owned regions — defense is drawn from the national pool instead
     captured = true;
   } else {
     const ratio = attackPower / defendPower; // 0..1
-    survivors = Math.max(1, Math.round(defendTroops * (1 - ratio * 0.6)));
-    to.troops = survivors;
+    const defenseSurvivors = Math.max(1, Math.round(defendTroopsCommitted * (1 - ratio * 0.6)));
+    if (defenderNation) {
+      const losses = Math.max(0, defendTroopsCommitted - defenseSurvivors);
+      defenderNation.troops = Math.max(0, defenderNation.troops - losses);
+    } else {
+      to.troops = defenseSurvivors;
+    }
+    survivors = defenseSurvivors;
     captured = false;
   }
 
@@ -192,7 +247,7 @@ export function attack(world: World, fromId: string, toId: string, nationId: Nat
     fromRegionId: fromId,
     toRegionId: toId,
     attackTroops,
-    defendTroops,
+    defendTroops: defendTroopsCommitted,
     captured,
     survivors,
   };
@@ -226,34 +281,37 @@ export function checkVictoryDefeat(world: World): void {
 }
 
 /**
- * Very small rule-based AI: for the given nation, find its single best attack
- * opportunity (an adjacent region it can plausibly beat) and take it. If none
- * is found, invest in a barracks in its weakest border region instead (the
- * AI trains troops the same way the player does — no shortcuts). Called
- * periodically per-nation from the game loop, at most one action per call.
+ * Very small rule-based AI: for the given nation, find its single best
+ * attack opportunity (an adjacent region its shared army can plausibly
+ * beat) and take it. If none is found, invest in whichever owned region has
+ * the fewest barracks levels (spreading out its "strategic placement" the
+ * same way the player has to), or once every region is fully built up,
+ * reinforce a border region's fortress instead. Called periodically per
+ * nation from the game loop, at most one action per call.
  */
 export function runAiTurn(world: World, nationId: NationId): CombatResult | null {
   const nation = world.nations[nationId];
   if (!nation || nation.defeated || nation.isPlayer) return null;
 
-  const ownRegions = Object.values(world.regions).filter((r) => r.owner === nationId);
+  const ownRegions = getRegionsOwnedBy(world, nationId);
   if (ownRegions.length === 0) return null;
 
+  const attackTroopsAvailable = nation.troops * 0.7;
   let bestAttack: { from: Region; to: Region; score: number } | null = null;
 
-  for (const from of ownRegions) {
-    if (from.troops < AI_MIN_ATTACK_TROOPS) continue;
-    for (const neighborId of from.neighbors) {
-      const to = world.regions[neighborId];
-      if (!to || to.owner === nationId) continue;
+  if (attackTroopsAvailable >= AI_MIN_ATTACK_TROOPS) {
+    for (const from of ownRegions) {
+      for (const neighborId of from.neighbors) {
+        const to = world.regions[neighborId];
+        if (!to || to.owner === nationId) continue;
 
-      const attackTroops = from.troops * 0.7;
-      const defendPower = regionDefensePower(to);
-      if (attackTroops < defendPower * AI_SAFETY_MARGIN) continue;
+        const defendPower = getEffectiveDefensePower(world, to);
+        if (attackTroopsAvailable < defendPower * AI_SAFETY_MARGIN) continue;
 
-      const score = attackTroops - defendPower;
-      if (!bestAttack || score > bestAttack.score) {
-        bestAttack = { from, to, score };
+        const score = attackTroopsAvailable - defendPower;
+        if (!bestAttack || score > bestAttack.score) {
+          bestAttack = { from, to, score };
+        }
       }
     }
   }
@@ -262,12 +320,18 @@ export function runAiTurn(world: World, nationId: NationId): CombatResult | null
     return attack(world, bestAttack.from.id, bestAttack.to.id, nationId, 0.7);
   }
 
-  // No good attack available: invest in the barracks of the border region with
-  // the weakest garrison, so it can start (or keep) training troops there.
+  const belowMaxBarracks = ownRegions.filter((r) => r.buildings.barracks < MAX_BUILDING_LEVEL);
+  if (belowMaxBarracks.length > 0) {
+    const target = belowMaxBarracks.sort((a, b) => a.buildings.barracks - b.buildings.barracks)[0];
+    upgradeBuilding(world, nationId, target.id, "barracks");
+    return null;
+  }
+
   const borderRegions = ownRegions.filter((r) => r.neighbors.some((n) => world.regions[n]?.owner !== nationId));
-  const weakest = (borderRegions.length > 0 ? borderRegions : ownRegions).sort((a, b) => a.troops - b.troops)[0];
-  if (weakest) {
-    upgradeBuilding(world, nationId, weakest.id, "barracks");
+  const fortressCandidates = (borderRegions.length > 0 ? borderRegions : ownRegions).filter((r) => r.buildings.fortress < MAX_BUILDING_LEVEL);
+  if (fortressCandidates.length > 0) {
+    const target = fortressCandidates.sort((a, b) => a.buildings.fortress - b.buildings.fortress)[0];
+    upgradeBuilding(world, nationId, target.id, "fortress");
   }
   return null;
 }

@@ -1,13 +1,14 @@
-import { NEUTRAL, type NationId, type World } from "../game/state";
+import { NEUTRAL, type NationId, type Region, type World } from "../game/state";
 import {
   BUILDING_CONFIG,
   MAX_BUILDING_LEVEL,
-  TRAINING_GOLD_COST_PER_TROOP,
   buildingCost,
   getEffectiveDefensePower,
   getEffectiveIncome,
-  getEffectiveTroopCap,
-  getTrainingRatePerSecond,
+  getNationIncome,
+  getNationTrainingRatePerSecond,
+  getNationTroopCap,
+  getRegionsOwnedBy,
 } from "../game/engine";
 import { TOTAL_REGION_COUNT } from "../game/world";
 
@@ -24,14 +25,15 @@ function fmt(n: number): string {
 
 export function renderResourceBar(el: HTMLElement, world: World): void {
   const player = world.nations["player"];
-  const playerRegions = Object.values(world.regions).filter((r) => r.owner === "player");
-  const totalTroops = playerRegions.reduce((sum, r) => sum + r.troops, 0);
-  const totalIncome = playerRegions.reduce((sum, r) => sum + getEffectiveIncome(r), 0);
+  const playerRegions = getRegionsOwnedBy(world, "player");
+  const totalIncome = getNationIncome(world, "player");
+  const troopCap = getNationTroopCap(world, "player");
+  const trainingRate = getNationTrainingRatePerSecond(world, "player");
   const worldShare = ((playerRegions.length / TOTAL_REGION_COUNT) * 100).toFixed(1);
 
   el.innerHTML = `
     <span class="res">💰 ${fmt(player?.gold ?? 0)} Gold <small>(+${totalIncome.toFixed(1)}/s)</small></span>
-    <span class="res">⚔️ ${fmt(totalTroops)} Truppen</span>
+    <span class="res">⚔️ ${fmt(player?.troops ?? 0)} / ${fmt(troopCap)} Truppen <small>(+${(trainingRate * 60).toFixed(1)}/Min)</small></span>
     <span class="res">🗺️ ${playerRegions.length} / ${TOTAL_REGION_COUNT} Länder <small>(${worldShare}%)</small></span>
   `;
 }
@@ -76,18 +78,13 @@ export function renderSelection(el: HTMLElement, actionEl: HTMLElement, world: W
     return;
   }
   const fromOwnerName = ownerName(world, from.owner);
-  const trainingRate = getTrainingRatePerSecond(from);
-  const trainingText =
-    trainingRate > 0
-      ? `${(trainingRate * 60).toFixed(1)} Truppen/Min <small>(${TRAINING_GOLD_COST_PER_TROOP} Gold/Truppe, Kaserne Stufe ${from.buildings.barracks})</small>`
-      : `<span class="no-training">keine Kaserne — Truppen wachsen nicht von selbst</span>`;
+  const defensePower = Math.round(getEffectiveDefensePower(world, from));
   el.innerHTML += `
     <div class="region-detail">
       <h3>${from.name}</h3>
       <p>Besitzer: <strong>${fromOwnerName}</strong></p>
-      <p>Truppen: <strong>${fmt(from.troops)}</strong> / Kapazität ${fmt(getEffectiveTroopCap(from))}</p>
-      <p>Ausbildung: ${trainingText}</p>
       <p>Einkommen: <strong>${getEffectiveIncome(from).toFixed(1)}</strong> Gold/s</p>
+      <p>Geschätzte Verteidigung hier: <strong>~${fmt(defensePower)}</strong> Truppen</p>
     </div>
   `;
 
@@ -107,14 +104,15 @@ export function renderSelection(el: HTMLElement, actionEl: HTMLElement, world: W
     const to = world.regions[selection.toId];
     if (to) {
       const toOwnerName = ownerName(world, to.owner);
+      const toDefensePower = Math.round(getEffectiveDefensePower(world, to));
       actionsHtml += `
         <div class="action-group attack-group">
-          <h4>Angriff auf ${to.name} (${toOwnerName}, ${fmt(to.troops)} Truppen)</h4>
+          <h4>Angriff auf ${to.name} (${toOwnerName}, ~${fmt(toDefensePower)} Truppen Verteidigung)</h4>
           <label>
             Einsatz: <span id="attack-fraction-label">${selection.attackFraction}%</span>
             <input type="range" id="attack-fraction" min="10" max="100" step="5" value="${selection.attackFraction}" data-action="set-fraction" />
           </label>
-          <div id="attack-estimate">${buildAttackEstimateHtml(from, to, selection.attackFraction)}</div>
+          <div id="attack-estimate">${buildAttackEstimateHtml(world, from.owner, to, selection.attackFraction)}</div>
           <button data-action="attack" class="attack-btn">⚔️ Angriff starten</button>
         </div>
       `;
@@ -128,14 +126,15 @@ export function renderSelection(el: HTMLElement, actionEl: HTMLElement, world: W
 
 /**
  * Rough attack-odds estimate shown in the attack panel: attacker troops
- * (given the current slider %) vs. the defender's effective defense power
- * (troops × neutral/fortress bonuses). The real combat roll uses a random
- * ±15% swing on both sides, so this ratio is a good average-case indicator,
- * not an exact guarantee.
+ * (the current slider % of the attacker's whole shared army) vs. the
+ * defender's effective defense power (troops × neutral/fortress bonuses).
+ * The real combat roll uses a random ±15% swing on both sides, so this
+ * ratio is a good average-case indicator, not an exact guarantee.
  */
-function buildAttackEstimateHtml(from: World["regions"][string], to: World["regions"][string], attackFraction: number): string {
-  const attackTroops = Math.max(1, Math.floor(from.troops * (attackFraction / 100)));
-  const defensePower = getEffectiveDefensePower(to);
+function buildAttackEstimateHtml(world: World, attackerNationId: NationId, to: Region, attackFraction: number): string {
+  const attackerNation = world.nations[attackerNationId];
+  const attackTroops = Math.max(1, Math.floor((attackerNation?.troops ?? 0) * (attackFraction / 100)));
+  const defensePower = getEffectiveDefensePower(world, to);
   const ratio = defensePower > 0 ? attackTroops / defensePower : Infinity;
 
   let label: string;
@@ -166,7 +165,7 @@ export function updateAttackEstimate(world: World, selection: SelectionState): v
   const to = world.regions[selection.toId];
   const el = document.getElementById("attack-estimate");
   if (!from || !to || !el) return;
-  el.innerHTML = buildAttackEstimateHtml(from, to, selection.attackFraction);
+  el.innerHTML = buildAttackEstimateHtml(world, from.owner, to, selection.attackFraction);
 }
 
 function renderBuildingRows(region: World["regions"][string], gold: number): string {

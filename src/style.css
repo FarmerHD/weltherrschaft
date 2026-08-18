@@ -179,10 +179,6 @@ html, body {
   font-size: 0.85rem;
 }
 
-.no-training {
-  color: #d68b4c;
-}
-
 .combat-log {
   background: #232c3d;
   border-left: 3px solid var(--accent);

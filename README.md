@@ -18,30 +18,47 @@ Komplett clientseitig (kein Server nötig), Spielstand liegt im Browser
 - Jedes eigene Land generiert automatisch Gold pro Sekunde — auch während du
   nicht spielst (beim nächsten Laden wird die vergangene Zeit nachgerechnet,
   gedeckelt auf 12 Stunden).
-- Truppen werden **nicht gekauft**, sondern in einer **Kaserne ausgebildet**.
-  Jedes Startland (deins wie die der KI) hat von Anfang an eine Kaserne Stufe
-  1, bildet also sofort Truppen aus (kostet fortlaufend Gold pro
-  ausgebildeter Truppe) — höhere Kasernen-Stufen bilden schneller aus *und*
-  erhöhen die Truppenkapazität. Eroberst du ein fremdes Land ohne eigene
-  Kaserne, musst du dort erst eine bauen, damit es Truppen nachzieht.
-  Erobertst du ein fremdes Land mit Kaserne, gehört dir auch diese Kaserne
-  (und umgekehrt: verlierst du ein Land, verlierst du die Kaserne dort mit).
-- Weitere **Infrastruktur** in einem eigenen Land: Wirtschaft (+25 %
-  Gold/Stufe), Festung (+20 % Verteidigung/Stufe), je bis Stufe 3.
+- **Deine Truppen sind eine einzige, geteilte Armee** — keine Truppen, die
+  fest in einzelnen Ländern herumstehen. Jeder Angriff verbraucht einen Teil
+  deiner Gesamtarmee, und jedes eigene Land wird automatisch von einem
+  gleichmäßigen Anteil dieser Armee verteidigt (verstärkt durch eine
+  eventuelle Festung dort). Verlierst oder gewinnst du ein Gefecht, wirkt
+  sich das direkt auf deine Gesamtarmee aus, nicht auf ein einzelnes Land.
+- Truppen werden **nicht gekauft**, sondern in **Kasernen ausgebildet** —
+  und zwar für die gesamte Armee, egal wo im Land die Kaserne steht. Jede
+  Nation startet nur in ihrer **Hauptstadt** mit einer Kaserne Stufe 1 (bei
+  dir: Deutschland); alle weiteren Kasernen musst du selbst **strategisch
+  platzieren**. Je mehr/höhere Kasernen du im ganzen Land verteilt betreibst,
+  desto schneller wächst deine Gesamtarmee (kostet dabei fortlaufend Gold
+  pro ausgebildeter Truppe). Eroberst du ein fremdes Land mit Kaserne, gehört
+  dir auch diese Kaserne (und umgekehrt: verlierst du ein Land, verlierst du
+  die Kaserne dort mit).
+- **Größere Länder produzieren etwas mehr Gold** — Einkommen, Truppenkapazität
+  und die Verteidigungsstärke neutraler Länder skalieren sanft mit der
+  echten Landfläche (ein kleiner Stadtstaat bringt weniger als ein
+  Flächenstaat wie Russland, aber nicht dramatisch weniger — die Skalierung
+  ist bewusst gedämpft, damit große Länder nicht unbesiegbar werden).
+- Weitere **Infrastruktur** in einem eigenen Land: Wirtschaft (+25 % Gold
+  *dieses Landes* pro Stufe), Festung (+20 % Verteidigung *dieses Landes*
+  pro Stufe), je bis Stufe 3.
 - **Land mit der Maus berühren** zeigt sofort ein Tooltip mit Besitzer,
-  aktueller Truppenzahl und Einkommen — so siehst du vor einem Angriff genau,
-  wie stark das Zielland gerade ist, ohne es erst anklicken zu müssen.
+  geschätzter Verteidigungsstärke und Einkommen — so siehst du vor einem
+  Angriff genau, wie stark das Zielland gerade ist, ohne es erst anklicken
+  zu müssen.
 - Klicke ein eigenes Land an, dann ein angrenzendes fremdes Land, um einen
-  Angriff vorzubereiten. Das Angriffspanel zeigt eine grobe
-  **Erfolgschancen-Einschätzung** (Angriffsstärke vs. Verteidigung) direkt
-  neben dem Schieberegler, der bestimmt, wie viel Prozent der stationierten
-  Truppen du einsetzt — Vorsicht: Wer sein Grenzland leer räumt, riskiert
-  einen sofortigen Gegenangriff der KI.
+  Angriff vorzubereiten (du greifst weiterhin über eine konkrete, an das
+  Ziel angrenzende eigene Grenze an — nur die eingesetzten Truppen kommen
+  jetzt aus der gemeinsamen Armee statt aus einer lokalen Garnison). Das
+  Angriffspanel zeigt eine grobe **Erfolgschancen-Einschätzung**
+  (Angriffsstärke vs. Verteidigung) direkt neben dem Schieberegler, der
+  bestimmt, wie viel Prozent deiner Gesamtarmee du einsetzt — Vorsicht: Wer
+  seine ganze Armee in einen Angriff wirft, schwächt die Verteidigung all
+  seiner anderen Länder gleichzeitig.
 - Sieg: Du kontrollierst 50 % aller Länder. Niederlage: Du verlierst dein
   letztes Land.
 - Fünf KI-Nationen (Frankreich, Russland, China, USA, Arabische Liga) greifen
   eigenständig regelbasiert an: Sie suchen sich das schwächste erreichbare
-  Nachbarland und verstärken sonst ihre Grenzländer.
+  Nachbarland und bauen sonst gezielt Kasernen bzw. Festungen aus.
 
 ## Lokal starten
 

@@ -64,23 +64,29 @@ for (const i of keepIndices) {
   }
 }
 
-// --- Size tier from real geographic area (rank-based, since land area is --
-// --- extremely skewed — a handful of huge countries, many tiny ones). ---
+// --- Per-region stats scaled continuously from real geographic area -----
+// (replaces the old 3-bucket tier system). Land area is extremely skewed —
+// Russia is ~7000x the size of Luxembourg — so raw area would make giant
+// countries absurdly overpowered and tiny ones worthless. A fourth-root
+// compresses that down to a much gentler ~9x spread between the smallest
+// and largest country, which reads as "bigger countries produce a bit more"
+// (as requested) rather than an unbeatable-superpower snowball. Constants
+// were fitted so the results land in roughly the same range the old 3-tier
+// system used (10-28 troops, 35-100 capacity, 1.0-3.5 income), just now on
+// a smooth curve instead of 3 buckets.
+const AREA_EXPONENT = 0.25;
 
 const areaByIdx = new Map<number, number>();
 for (const i of keepIndices) areaByIdx.set(i, geoArea(COUNTRY_FEATURES[i]));
-const rankedByArea = [...keepIndices].sort((a, b) => areaByIdx.get(a)! - areaByIdx.get(b)!);
-const tierByIdx = new Map<number, 1 | 2 | 3>();
-rankedByArea.forEach((idx, rank) => {
-  const fraction = rank / rankedByArea.length;
-  tierByIdx.set(idx, fraction < 1 / 3 ? 1 : fraction < 2 / 3 ? 2 : 3);
-});
 
-const TIER_STATS: Record<1 | 2 | 3, { income: number; troops: number; troopCap: number }> = {
-  1: { income: 1.0, troops: 10, troopCap: 35 },
-  2: { income: 2.0, troops: 18, troopCap: 65 },
-  3: { income: 3.5, troops: 28, troopCap: 100 },
-};
+function statsForArea(area: number): { income: number; troops: number; troopCap: number } {
+  const areaFactor = Math.pow(Math.max(area, 1e-8), AREA_EXPONENT);
+  return {
+    income: 0.5 + 2.49 * areaFactor,
+    troops: 7.8 + 25.2 * areaFactor,
+    troopCap: 27 + 90.9 * areaFactor,
+  };
+}
 
 /** Neutral (unowned) countries defend a bit harder than their raw troop count implies. */
 export const NEUTRAL_DEFENSE_BONUS = 1.15;
@@ -111,27 +117,35 @@ const idxByName = new Map<string, number>();
 keepIndices.forEach((i) => idxByName.set(COUNTRY_FEATURES[i].properties.name, i));
 
 const nationIdByRegionId = new Map<string, string>();
+/** First start country per nation = its "capital" — the only region that
+ *  begins with a barracks already built (see startingBuildings below). */
+const capitalRegionIdByNation = new Map<string, string>();
 for (const seed of NATION_SEEDS) {
-  for (const countryName of seed.startCountries) {
+  seed.startCountries.forEach((countryName, i) => {
     const idx = idxByName.get(countryName);
     if (idx === undefined) {
       console.warn(`Weltherrschaft: Startland "${countryName}" nicht in den Kartendaten gefunden.`);
-      continue;
+      return;
     }
-    nationIdByRegionId.set(regionIdOf(idx), seed.id);
-  }
+    const id = regionIdOf(idx);
+    nationIdByRegionId.set(id, seed.id);
+    if (i === 0) capitalRegionIdByNation.set(seed.id, id);
+  });
 }
 
 function emptyBuildings(): Region["buildings"] {
   return { economy: 0, barracks: 0, fortress: 0 };
 }
 
-/** Owned start regions begin with a level-1 barracks already built, so
- *  training begins on turn one instead of everyone sitting at 0 troops/s
- *  until they manually save up for and build their first barracks. */
-function startingBuildings(owner: string): Region["buildings"] {
+/** Only each nation's capital region begins with a level-1 barracks already
+ *  built — enough that training starts on turn one instead of the economy
+ *  sitting completely idle, while still leaving where to put every further
+ *  barracks (and fortress) as a real strategic choice for the player. */
+function startingBuildings(regionId: string, owner: string): Region["buildings"] {
   const buildings = emptyBuildings();
-  if (owner !== NEUTRAL) buildings.barracks = 1;
+  if (owner !== NEUTRAL && capitalRegionIdByNation.get(owner) === regionId) {
+    buildings.barracks = 1;
+  }
   return buildings;
 }
 
@@ -139,29 +153,35 @@ export function createInitialWorld(): World {
   const regions: Record<string, Region> = {};
   for (const idx of keepIndices) {
     const id = regionIdOf(idx);
-    const tier = tierByIdx.get(idx)!;
-    const stats = TIER_STATS[tier];
+    const stats = statsForArea(areaByIdx.get(idx)!);
     const owner = nationIdByRegionId.get(id) ?? NEUTRAL;
     regions[id] = {
       id,
       name: COUNTRY_FEATURES[idx].properties.name,
       neighbors: [...(neighborIdxByIdx.get(idx) ?? new Set())].map(regionIdOf),
       owner,
-      troops: stats.troops,
+      troops: Math.round(stats.troops),
       income: stats.income,
-      troopCap: stats.troopCap,
-      buildings: startingBuildings(owner),
+      troopCap: Math.round(stats.troopCap),
+      buildings: startingBuildings(id, owner),
     };
   }
 
   const nations: Record<string, Nation> = {};
   for (const seed of NATION_SEEDS) {
+    // Starting army = the sum of what each of the nation's start regions
+    // would have defended with on its own — a fair, non-arbitrary seed for
+    // the new shared pool.
+    const startingTroops = Object.values(regions)
+      .filter((r) => r.owner === seed.id)
+      .reduce((sum, r) => sum + r.troops, 0);
     nations[seed.id] = {
       id: seed.id,
       name: seed.name,
       color: seed.color,
       isPlayer: seed.isPlayer,
       gold: 60,
+      troops: startingTroops,
       defeated: false,
     };
   }

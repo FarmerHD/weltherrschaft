@@ -13,10 +13,14 @@ export interface Region {
   name: string;
   neighbors: string[];
   owner: NationId;
+  /** Only meaningful while owner is NEUTRAL — a neutral country's own fixed
+   *  defensive garrison. Once a nation conquers it, it stops being used:
+   *  that nation defends the region out of its single shared army pool
+   *  (see Nation.troops) instead of a per-region garrison. */
   troops: number;
-  /** Base gold generated per second while owned, before building bonuses. */
+  /** Base gold generated per second while owned, scaled by real land area — bigger countries produce a bit more. Before building bonuses. */
   income: number;
-  /** Base soft cap that passive troop regeneration approaches, before building bonuses. */
+  /** This region's contribution to its owner's shared troop capacity (see engine.ts getNationTroopCap), scaled by real land area. */
   troopCap: number;
   /** Building levels 0-3 each. Effects are applied via engine.ts helpers, not stored here. */
   buildings: Record<BuildingType, number>;
@@ -28,6 +32,10 @@ export interface Nation {
   color: string;
   isPlayer: boolean;
   gold: number;
+  /** The nation's single shared army — trained by barracks anywhere in its
+   *  territory, spent on attacks and split evenly across regions for
+   *  defense. Not tied to any one region. */
+  troops: number;
   /** True once a nation has lost all regions. */
   defeated: boolean;
 }
@@ -47,11 +55,10 @@ export interface SaveGame {
   world: World;
 }
 
-// Bumped for the real-country map + buildings rework: old saves used
-// different region ids (slugs like "germany") and lack the buildings field,
-// so they must not be loaded into the new model.
-const SAVE_VERSION = 2;
-const SAVE_KEY = "weltherrschaft-save-v2";
+// Bumped for the shared-army rework: troops moved from Region to Nation, so
+// old saves (per-region garrisons) must not be loaded into the new model.
+const SAVE_VERSION = 3;
+const SAVE_KEY = "weltherrschaft-save-v3";
 /** Cap offline simulation so leaving the tab open for days doesn't cause a huge jump. */
 const MAX_OFFLINE_SECONDS = 12 * 60 * 60;
 

@@ -4,7 +4,7 @@ import { geoNaturalEarth1, geoPath, type GeoPath, type GeoProjection } from "d3-
 import type { FeatureCollection } from "geojson";
 import { NEUTRAL, type World } from "../game/state";
 import { COUNTRY_FEATURES, type CountryFeature } from "../game/world";
-import { getEffectiveIncome } from "../game/engine";
+import { getEffectiveDefensePower, getEffectiveIncome } from "../game/engine";
 
 const WIDTH = 1000;
 const HEIGHT = 520;
@@ -118,14 +118,14 @@ export class MapRenderer {
     if (!world || !region) return;
 
     const ownerName = region.owner === NEUTRAL ? "Neutral" : (world.nations[region.owner]?.name ?? region.owner);
-    const troops = Math.floor(region.troops);
+    const defensePower = Math.round(getEffectiveDefensePower(world, region));
     const income = getEffectiveIncome(region).toFixed(1);
     const isAttackable = this.currentSelection.attackableIds.includes(id);
 
     this.tooltip.html(
       `<strong>${region.name}</strong><br>` +
         `Besitzer: ${ownerName}<br>` +
-        `Truppen: ${troops}<br>` +
+        `Verteidigung: ~${defensePower} Truppen<br>` +
         `Einkommen: ${income} Gold/s` +
         (isAttackable ? `<br><span class="tooltip-hint">⚔️ angreifbar</span>` : ""),
     );
